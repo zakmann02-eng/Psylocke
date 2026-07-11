@@ -64,6 +64,44 @@ Once you've watched real signals come through in dry run and are comfortable
 with the sizing, set `DRY_RUN=false` and fill in `POLY_PRIVATE_KEY` /
 `POLY_FUNDER_ADDRESS` for the account that will actually trade.
 
+## Deploying on Railway
+
+Both bots share one SQLite file, and a Railway Volume only attaches to a
+single service — so they're deployed as **one Railway service running two
+processes**, not two separate services. `run_both.py` launches both
+(`psylocke.signal_bot` and `psylocke.execution_bot`) as subprocesses; if
+either exits, it brings the other down too, so Railway's restart policy
+restarts them together rather than leaving one running against a
+signals table nothing is producing for (or consuming from).
+
+1. **New Railway project** → deploy from this GitHub repo. Railway's
+   Nixpacks builder auto-detects Python from `requirements.txt`; the
+   `Procfile` (`worker: python run_both.py`) tells it what to run. No web
+   port is exposed — this is a background worker, not an HTTP service.
+2. **Attach a Volume** to the service, mounted at e.g. `/data`.
+3. **Set environment variables** in the service's Variables tab —
+   everything in `.env.example`, plus:
+   ```
+   DB_PATH=/data/psylocke.db
+   ```
+   so the shared database lands on the volume instead of the container's
+   ephemeral disk. Leave `DRY_RUN=true` until you've verified signals
+   against real wallet activity (see below); `POLY_PRIVATE_KEY` and
+   `POLY_FUNDER_ADDRESS` only need to be set once you flip it to `false`.
+4. **Deploy.** Logs from both bots interleave in the same Railway log
+   stream, prefixed `psylocke.signal_bot` / `psylocke.execution_bot` so
+   you can tell them apart.
+5. To inspect the signals table on a running deployment, use `railway run`
+   or `railway shell` to get a shell with the same volume mounted, then run
+   the `sqlite3` query from the Setup section above against `/data/psylocke.db`.
+
+If you'd rather run Psylocke 1 and Psylocke 2 as fully independent Railway
+services later (separate logs/restarts/scaling), that requires swapping
+the shared SQLite file for a networked database (e.g. Railway's managed
+Postgres addon) so both services can reach it without a shared volume —
+happy to do that migration if you want that separation, but it's more
+moving parts than this setup needs today.
+
 ## Before you go live — read this
 
 - **This was built without network access to Polymarket's API.** The
