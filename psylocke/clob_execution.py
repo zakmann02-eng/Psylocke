@@ -26,7 +26,7 @@ class ExecutionClient:
                 host=self._config.clob_api_base,
                 key=self._config.poly_private_key,
                 chain_id=self._config.poly_chain_id,
-                signature_type=2,
+                signature_type=self._config.poly_signature_type,
                 funder=self._config.poly_funder_address or None,
             )
             client.set_api_creds(client.create_or_derive_api_creds())

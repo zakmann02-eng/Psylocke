@@ -143,6 +143,14 @@ specifically need that separation.
   `MIN_TRADE_USD` are safety rails, not guarantees — size them deliberately.
 - **Credentials.** `POLY_PRIVATE_KEY` controls real funds. Keep `.env` out
   of version control (already in `.gitignore`) and never share it.
+- **`POLY_FUNDER_ADDRESS` / `POLY_SIGNATURE_TYPE` must match how the
+  trading account logs into Polymarket**, or orders will try to settle
+  against the wrong address. `POLY_FUNDER_ADDRESS` is not your raw wallet
+  address — it's the proxy wallet Polymarket holds your USDC in, found at
+  `polymarket.com/profile/<address>` after logging into that account. Set
+  `POLY_SIGNATURE_TYPE` to `2` for a browser-wallet account (MetaMask,
+  etc. — the default here), `1` for email/magic-link login, or `0` for a
+  raw EOA with no proxy wallet at all.
 
 ## Tests
 

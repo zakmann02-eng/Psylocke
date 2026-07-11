@@ -63,6 +63,14 @@ class Config:
         default_factory=lambda: os.getenv("POLY_FUNDER_ADDRESS", "")
     )
     poly_chain_id: int = field(default_factory=lambda: int(os.getenv("POLY_CHAIN_ID", "137")))
+    # Which of Polymarket's order-signing schemes to use -- must match how
+    # the trading account logs in, or orders will settle against the wrong
+    # address. 0 = EOA (raw private key, no proxy), 1 = POLY_PROXY (email /
+    # magic-link login), 2 = POLY_GNOSIS_SAFE (browser wallet, e.g.
+    # MetaMask -- Polymarket's default for most human accounts).
+    poly_signature_type: int = field(
+        default_factory=lambda: int(os.getenv("POLY_SIGNATURE_TYPE", "2"))
+    )
 
 
 def load_config() -> Config:
