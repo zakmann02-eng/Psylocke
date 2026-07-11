@@ -48,6 +48,9 @@ class Config:
         default_factory=lambda: _get_float("MAX_POSITION_USD", 0)
     )
     min_trade_usd: float = field(default_factory=lambda: _get_float("MIN_TRADE_USD", 1))
+    # How long to keep resolved signals/dedup records before pruning them,
+    # so the sqlite file (and the volume it lives on) doesn't grow forever.
+    retention_days: float = field(default_factory=lambda: _get_float("RETENTION_DAYS", 30))
     db_path: str = field(default_factory=lambda: os.getenv("DB_PATH", "data/psylocke.db"))
     data_api_base: str = field(
         default_factory=lambda: os.getenv("DATA_API_BASE", "https://data-api.polymarket.com")

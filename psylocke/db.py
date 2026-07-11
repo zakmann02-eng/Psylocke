@@ -66,10 +66,41 @@ def get_connection(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
+    # auto_vacuum only takes effect on table creation, so it must be set
+    # before executescript() on a brand-new database file.
+    conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     conn.commit()
     return conn
+
+
+def prune_old_records(conn: sqlite3.Connection, retention_days: float) -> int:
+    """Delete signals/dedup records past their retention window so the
+    database doesn't grow without bound. Never touches PENDING signals or
+    the position ledgers, only the historical audit trail."""
+    cutoff = time.time() - retention_days * 86400
+    cur = conn.execute(
+        "DELETE FROM signals WHERE created_at < ? AND status != 'PENDING'",
+        (cutoff,),
+    )
+    deleted = cur.rowcount
+    conn.execute("DELETE FROM seen_activity WHERE seen_at < ?", (cutoff,))
+    conn.commit()
+    return deleted
+
+
+def incremental_vacuum(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA incremental_vacuum")
+    conn.commit()
+
+
+def checkpoint(conn: sqlite3.Connection) -> None:
+    """Flush WAL contents into the main db file and truncate it. Matters
+    most for short-lived (cron) processes -- without this the -wal file
+    lingers and regrows every run instead of the main file staying small.
+    """
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
 def is_wallet_seeded(conn: sqlite3.Connection, wallet: str) -> bool:

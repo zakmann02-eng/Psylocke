@@ -93,7 +93,21 @@ def process_activity_item(conn, wallet: str, item: dict, bankroll_usd: float, da
     )
 
 
+def poll_once(conn, data_client: DataAPIClient, config) -> None:
+    """One pass over every tracked wallet's recent activity. Shared by the
+    always-on loop (run()) and the single-shot cron entrypoint."""
+    for wallet in config.tracked_wallets:
+        activity = data_client.get_activity(wallet, limit=50)
+        for item in reversed(activity):  # oldest first, preserves ledger order
+            signal_id = process_activity_item(conn, wallet, item, config.bankroll_usd, data_client)
+            if signal_id:
+                logger.info("new signal id=%s wallet=%s token=%s", signal_id, wallet, item.get("asset"))
+
+
 def run():
+    """Continuous loop for always-on deployments (e.g. run_both.py). For a
+    scheduled/cron deployment, use run_cron.py instead -- it calls
+    poll_once() a single time per invocation."""
     config = load_config()
     conn = db.get_connection(config.db_path)
     data_client = DataAPIClient(config.data_api_base)
@@ -101,20 +115,12 @@ def run():
     for wallet in config.tracked_wallets:
         seed_wallet(conn, data_client, wallet)
 
-    def poll_once():
-        for wallet in config.tracked_wallets:
-            activity = data_client.get_activity(wallet, limit=50)
-            for item in reversed(activity):  # oldest first, preserves ledger order
-                signal_id = process_activity_item(conn, wallet, item, config.bankroll_usd, data_client)
-                if signal_id:
-                    logger.info("new signal id=%s wallet=%s token=%s", signal_id, wallet, item.get("asset"))
-
     logger.info(
         "Psylocke 1 (signal bot) watching %d wallet(s), poll every %ss",
         len(config.tracked_wallets),
         config.poll_interval_seconds,
     )
-    poll_forever(poll_once, config.poll_interval_seconds, logger)
+    poll_forever(lambda: poll_once(conn, data_client, config), config.poll_interval_seconds, logger)
 
 
 if __name__ == "__main__":

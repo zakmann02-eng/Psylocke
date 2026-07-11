@@ -67,40 +67,59 @@ with the sizing, set `DRY_RUN=false` and fill in `POLY_PRIVATE_KEY` /
 ## Deploying on Railway
 
 Both bots share one SQLite file, and a Railway Volume only attaches to a
-single service — so they're deployed as **one Railway service running two
-processes**, not two separate services. `run_both.py` launches both
-(`psylocke.signal_bot` and `psylocke.execution_bot`) as subprocesses; if
-either exits, it brings the other down too, so Railway's restart policy
-restarts them together rather than leaving one running against a
-signals table nothing is producing for (or consuming from).
+single service — so either way, this deploys as **one Railway service**,
+not two. There are two ways to run that one service, and they trade cost
+against reaction speed:
 
-1. **New Railway project** → deploy from this GitHub repo. Railway's
-   Nixpacks builder auto-detects Python from `requirements.txt`; the
-   `Procfile` (`worker: python run_both.py`) tells it what to run. No web
-   port is exposed — this is a background worker, not an HTTP service.
-2. **Attach a Volume** to the service, mounted at e.g. `/data`.
-3. **Set environment variables** in the service's Variables tab —
-   everything in `.env.example`, plus:
-   ```
-   DB_PATH=/data/psylocke.db
-   ```
-   so the shared database lands on the volume instead of the container's
-   ephemeral disk. Leave `DRY_RUN=true` until you've verified signals
-   against real wallet activity (see below); `POLY_PRIVATE_KEY` and
-   `POLY_FUNDER_ADDRESS` only need to be set once you flip it to `false`.
-4. **Deploy.** Logs from both bots interleave in the same Railway log
-   stream, prefixed `psylocke.signal_bot` / `psylocke.execution_bot` so
-   you can tell them apart.
-5. To inspect the signals table on a running deployment, use `railway run`
-   or `railway shell` to get a shell with the same volume mounted, then run
-   the `sqlite3` query from the Setup section above against `/data/psylocke.db`.
+|                        | Cron Job (recommended default) | Always-on worker |
+|------------------------|--------------------------------|-------------------|
+| Entrypoint             | `run_cron.py`                  | `run_both.py` (via `Procfile`) |
+| Billed for             | Only the seconds each run takes | The full time the container is up, 24/7 |
+| Reaction time to a new trade | Within one cron cycle (5 min minimum on Railway) | Within `POLL_INTERVAL_SECONDS` (default 30s) |
+| Rough duty cycle       | A run that takes ~5-10s every 5 min is ~2-3% of a day | 100% of a day |
 
-If you'd rather run Psylocke 1 and Psylocke 2 as fully independent Railway
-services later (separate logs/restarts/scaling), that requires swapping
-the shared SQLite file for a networked database (e.g. Railway's managed
-Postgres addon) so both services can reach it without a shared volume —
-happy to do that migration if you want that separation, but it's more
-moving parts than this setup needs today.
+Copying a wallet's trade a few minutes late doesn't change *what* you copy,
+just the fill price — for a bot whose main job is staying in sync with a
+trader's positions rather than front-running them, that's usually a
+reasonable trade for an order-of-magnitude cost cut. If you later decide
+speed matters more than cost, switching is a one-line change (the start
+command), not a rewrite.
+
+### Cron Job setup (cost-effective default)
+
+1. **New Railway project** → deploy from this GitHub repo.
+2. In the service's Settings, set a **Custom Start Command** of
+   `python run_cron.py` and a **Cron Schedule** of `*/5 * * * *` (every 5
+   minutes — Railway's minimum interval). This overrides the `Procfile`.
+3. **Attach a Volume** to the service, mounted at e.g. `/data`.
+4. **Set environment variables** — everything in `.env.example`, plus
+   `DB_PATH=/data/psylocke.db` so the database lands on the volume. Leave
+   `DRY_RUN=true` until you've verified signals against real wallet
+   activity; `POLY_PRIVATE_KEY`/`POLY_FUNDER_ADDRESS` only matter once you
+   flip it to `false`.
+5. Each run seeds any new wallets, does one signal-scan pass, one
+   execution pass, then **prunes signals/dedup records older than
+   `RETENTION_DAYS`** (default 30) and checkpoints the database — so the
+   volume stays at a few MB indefinitely instead of growing every run.
+   `PENDING` signals and the position ledgers are never pruned.
+
+### Always-on worker (lower latency, higher cost)
+
+Same steps, but leave the Custom Start Command unset (it'll use the
+`Procfile`'s `worker: python run_both.py`) and don't set a Cron Schedule.
+`run_both.py` launches `psylocke.signal_bot` and `psylocke.execution_bot`
+as two long-lived subprocesses and tears both down together if either
+exits, so Railway's restart policy restarts them in lockstep.
+
+Either way, inspect what happened with `railway run` / `railway shell` to
+get a shell with the volume mounted, then run the `sqlite3` query from the
+Setup section above against `/data/psylocke.db`.
+
+If you ever want Psylocke 1 and Psylocke 2 as fully independent Railway
+services (separate logs/restarts/scaling), that needs a networked database
+(e.g. Railway's managed Postgres addon) in place of the shared SQLite file
+— more moving parts than either option above, so only worth it if you
+specifically need that separation.
 
 ## Before you go live — read this
 

@@ -101,20 +101,26 @@ def process_signal(conn, execution_client, config, signal) -> None:
         execute_exit(conn, execution_client, config, signal)
 
 
+def poll_once(conn, execution_client: ExecutionClient, config) -> None:
+    """One pass over every actionable (past-delay) pending signal. Shared by
+    the always-on loop (run()) and the single-shot cron entrypoint."""
+    for signal in db.get_actionable_signals(conn, config.execution_delay_seconds):
+        process_signal(conn, execution_client, config, signal)
+
+
 def run():
+    """Continuous loop for always-on deployments (e.g. run_both.py). For a
+    scheduled/cron deployment, use run_cron.py instead -- it calls
+    poll_once() a single time per invocation."""
     config = load_config()
     conn = db.get_connection(config.db_path)
     execution_client = ExecutionClient(config)
-
-    def poll_once():
-        for signal in db.get_actionable_signals(conn, config.execution_delay_seconds):
-            process_signal(conn, execution_client, config, signal)
 
     logger.info(
         "Psylocke 2 (execution bot) started, dry_run=%s, execution_delay=%ss",
         config.dry_run, config.execution_delay_seconds,
     )
-    poll_forever(poll_once, config.poll_interval_seconds, logger)
+    poll_forever(lambda: poll_once(conn, execution_client, config), config.poll_interval_seconds, logger)
 
 
 if __name__ == "__main__":
