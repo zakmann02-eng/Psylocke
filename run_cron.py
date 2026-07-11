@@ -27,7 +27,7 @@ def main() -> None:
     config = load_config()
     conn = db.get_connection(config.db_path)
     try:
-        data_client = DataAPIClient(config.data_api_base)
+        data_client = DataAPIClient(config.data_api_base, config.gamma_api_base)
         execution_client = ExecutionClient(config)
 
         for wallet in config.tracked_wallets:

@@ -17,8 +17,9 @@ logger = logging.getLogger("psylocke.data_api")
 
 
 class DataAPIClient:
-    def __init__(self, base_url: str, timeout: float = 10.0):
+    def __init__(self, base_url: str, gamma_base_url: str = "https://gamma-api.polymarket.com", timeout: float = 10.0):
         self.base_url = base_url.rstrip("/")
+        self.gamma_base_url = gamma_base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
         retries = Retry(
@@ -29,8 +30,8 @@ class DataAPIClient:
         )
         self.session.mount("https://", HTTPAdapter(max_retries=retries))
 
-    def _get(self, path: str, params: dict) -> list:
-        url = f"{self.base_url}{path}"
+    def _get(self, base_url: str, path: str, params: dict) -> list:
+        url = f"{base_url}{path}"
         resp = self.session.get(url, params=params, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json()
@@ -38,6 +39,7 @@ class DataAPIClient:
     def get_activity(self, wallet: str, limit: int = 100) -> list:
         """Most recent on-chain trade activity for a wallet, newest first."""
         data = self._get(
+            self.base_url,
             "/activity",
             {
                 "user": wallet,
@@ -49,15 +51,35 @@ class DataAPIClient:
         return [item for item in data if item.get("type") == "TRADE"]
 
     def get_positions(self, wallet: str) -> list:
-        return self._get("/positions", {"user": wallet})
+        return self._get(self.base_url, "/positions", {"user": wallet})
 
     def get_portfolio_value(self, wallet: str) -> float:
-        data = self._get("/value", {"user": wallet})
+        data = self._get(self.base_url, "/value", {"user": wallet})
         if isinstance(data, list) and data:
             return float(data[0].get("value", 0.0))
         if isinstance(data, dict):
             return float(data.get("value", 0.0))
         return 0.0
+
+    def get_market_tags(self, condition_id: str) -> list:
+        """Best-effort category tags for a market, used to filter to
+        US-topic markets. Uses the separate Gamma API (gamma-api.polymarket.com),
+        which -- like the Data API -- hasn't been exercised against a live
+        response from this project. Verify a few real markets' tags before
+        trusting REQUIRE_US_MARKETS filtering."""
+        data = self._get(self.gamma_base_url, "/markets", {"condition_ids": condition_id})
+        if not data:
+            return []
+        market = data[0]
+        tags = []
+        for tag in market.get("tags") or []:
+            label = tag.get("label") if isinstance(tag, dict) else tag
+            if label:
+                tags.append(str(label).strip().lower())
+        category = market.get("category")
+        if category:
+            tags.append(str(category).strip().lower())
+        return tags
 
 
 def poll_forever(fn, interval_seconds: float, logger_: logging.Logger = logger):

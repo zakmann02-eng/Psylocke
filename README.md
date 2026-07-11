@@ -22,21 +22,50 @@ independently restartable.
 2. On the first sight of a wallet it seeds a local ledger of that wallet's
    current holdings and marks existing history as seen, so only trades made
    *after* startup generate signals.
-3. A new **BUY** becomes an `ENTRY` signal. Size is computed proportionally:
+3. Every new trade's market is checked against `REQUIRE_US_MARKETS` (default
+   `true`): if the market isn't tagged as a US-topic market (politics,
+   elections, US economy — see `US_MARKET_TAGS`), no signal is created for
+   it at all. The wallet's position ledger still updates either way, so
+   later exit-fraction math stays correct even for markets you never copy.
+   A market whose tags can't be determined is treated as non-US (fails
+   closed) rather than risking a copy outside scope.
+4. A new **BUY** becomes an `ENTRY` signal. Size is computed proportionally:
    `your_bankroll / tracked_wallet_portfolio_value * tracked_trade_usd`
    (see `BANKROLL_USD` below), optionally capped by `MAX_POSITION_USD`.
-4. A new **SELL** becomes an `EXIT` signal carrying the fraction of the
+5. A new **SELL** becomes an `EXIT` signal carrying the fraction of the
    tracked wallet's position it closed (e.g. sold half → `exit_fraction=0.5`).
    Psylocke 2 exits the same fraction of *your* position in that market —
    not a dollar-matched exit — so you stay aligned with the trader you're
    following regardless of how your position size diverged from theirs.
-5. Psylocke 2 only acts on signals older than `EXECUTION_DELAY_SECONDS`.
+6. Psylocke 2 only acts on signals older than `EXECUTION_DELAY_SECONDS`.
    This delay is deliberate: instant, exact copying is what makes a
    follow-bot conspicuous and easy to flag. Some lag is unavoidable anyway
    (you're reacting to on-chain data), so this just makes it explicit and
    configurable rather than accidental.
-6. While `DRY_RUN=true` (the default), Psylocke 2 logs what it *would* do
+7. While `DRY_RUN=true` (the default), Psylocke 2 logs what it *would* do
    and updates its own simulated position ledger, but places no real order.
+8. Every signal Psylocke 1 creates, and every action Psylocke 2 takes
+   (entered, exited, or failed), is pushed to Telegram in real time if
+   `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` are set — see below.
+
+## Real-time visibility (Telegram)
+
+Both bots post to the same Telegram chat independently — there's no direct
+channel between them (see architecture note above), so this doubles as a
+human-readable view of the handoff: Psylocke 1's "new ENTRY/EXIT signal"
+messages followed by Psylocke 2's "bought/sold X shares... mirroring wallet
+Y" (or `SKIPPED`/`FAILED`) response to it.
+
+1. Message **@BotFather** on Telegram → `/newbot` → follow the prompts.
+   Save the token it gives you (`TELEGRAM_BOT_TOKEN`).
+2. Start a chat with your new bot (or add it to a group/channel), send it
+   any message.
+3. Visit `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and
+   find `"chat":{"id": ...}` in the response — that's `TELEGRAM_CHAT_ID`
+   (negative for groups/channels).
+4. Set both as environment variables (Railway Variables tab, not `.env` in
+   the repo). Leave them blank to disable — both bots still log locally
+   either way, this is additive.
 
 ## Setup
 
@@ -151,6 +180,14 @@ specifically need that separation.
   `POLY_SIGNATURE_TYPE` to `2` for a browser-wallet account (MetaMask,
   etc. — the default here), `1` for email/magic-link login, or `0` for a
   raw EOA with no proxy wallet at all.
+- **`US_MARKET_TAGS`' default value is a best guess, not verified.**
+  `psylocke/polymarket_data.py`'s `get_market_tags()` (Gamma API) hasn't
+  been exercised against a live response any more than the Data API has.
+  Before relying on `REQUIRE_US_MARKETS` to keep you scoped to US-topic
+  markets, pull tags for a few real markets you expect to match (and a few
+  you expect to be filtered out) and confirm `US_MARKET_TAGS` actually
+  lines up with what Polymarket returns — the failure mode if it's wrong
+  is fail-closed (signals get skipped), never fail-open.
 
 ## Tests
 

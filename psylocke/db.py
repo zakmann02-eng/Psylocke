@@ -59,6 +59,12 @@ CREATE TABLE IF NOT EXISTS own_positions (
     source_wallet TEXT,
     updated_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS market_tags (
+    market_id TEXT PRIMARY KEY,
+    tags TEXT NOT NULL,       -- comma-joined, lowercase
+    fetched_at REAL NOT NULL
+);
 """
 
 
@@ -205,5 +211,26 @@ def upsert_own_position(
         "ON CONFLICT(token_id) DO UPDATE SET shares = excluded.shares, "
         "avg_price = excluded.avg_price, updated_at = excluded.updated_at",
         (token_id, market_id, shares, avg_price, source_wallet, time.time()),
+    )
+    conn.commit()
+
+
+def get_cached_market_tags(conn: sqlite3.Connection, market_id: str):
+    """Returns a list of tags, or None if this market has never been looked
+    up (as opposed to [] which means "looked up, has no tags")."""
+    row = conn.execute(
+        "SELECT tags FROM market_tags WHERE market_id = ?", (market_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return [t for t in row["tags"].split(",") if t]
+
+
+def set_market_tags(conn: sqlite3.Connection, market_id: str, tags) -> None:
+    conn.execute(
+        "INSERT INTO market_tags (market_id, tags, fetched_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(market_id) DO UPDATE SET tags = excluded.tags, "
+        "fetched_at = excluded.fetched_at",
+        (market_id, ",".join(tags), time.time()),
     )
     conn.commit()

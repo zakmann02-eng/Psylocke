@@ -32,6 +32,9 @@ def test_run_cron_main_seeds_signals_and_defers_execution(tmp_path, monkeypatch)
     monkeypatch.setenv("DB_PATH", str(tmp_path / "cron.db"))
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setenv("EXECUTION_DELAY_SECONDS", "20")
+    # US-market filtering is covered separately in test_signal_bot.py; keep
+    # it off here so this test only exercises cron wiring.
+    monkeypatch.setenv("REQUIRE_US_MARKETS", "false")
 
     fake_data_client = FakeDataClient()
     monkeypatch.setattr(run_cron, "DataAPIClient", lambda *a, **kw: fake_data_client)

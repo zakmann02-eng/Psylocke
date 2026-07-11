@@ -29,6 +29,21 @@ def _get_wallets() -> list:
     return wallets
 
 
+# Best-effort default -- Polymarket's actual tag taxonomy hasn't been
+# verified against a live response (see polymarket_data.py). Check real
+# tag values for a few markets you care about and adjust US_MARKET_TAGS
+# before relying on this filter.
+DEFAULT_US_MARKET_TAGS = (
+    "politics,us-politics,us-current-affairs,us-election,elections,"
+    "congress,supreme-court,fed,federal-reserve,us-economy,economy"
+)
+
+
+def _get_tag_set(name: str, default_csv: str) -> frozenset:
+    raw = os.getenv(name, default_csv)
+    return frozenset(t.strip().lower() for t in raw.split(",") if t.strip())
+
+
 @dataclass(frozen=True)
 class Config:
     tracked_wallets: list = field(default_factory=_get_wallets)
@@ -71,6 +86,22 @@ class Config:
     poly_signature_type: int = field(
         default_factory=lambda: int(os.getenv("POLY_SIGNATURE_TYPE", "2"))
     )
+    gamma_api_base: str = field(
+        default_factory=lambda: os.getenv("GAMMA_API_BASE", "https://gamma-api.polymarket.com")
+    )
+    # If true, Psylocke 1 only signals on markets tagged with one of
+    # us_market_tags; a market whose tags can't be determined is skipped
+    # (fail closed) rather than risk copying a non-US market.
+    require_us_markets: bool = field(
+        default_factory=lambda: _get_bool("REQUIRE_US_MARKETS", True)
+    )
+    us_market_tags: frozenset = field(
+        default_factory=lambda: _get_tag_set("US_MARKET_TAGS", DEFAULT_US_MARKET_TAGS)
+    )
+    telegram_bot_token: str = field(
+        default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", "")
+    )
+    telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
 
 
 def load_config() -> Config:

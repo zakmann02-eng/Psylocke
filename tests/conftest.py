@@ -26,4 +26,10 @@ def config(tmp_path):
         max_position_usd=0,
         min_trade_usd=1,
         db_path=str(tmp_path / "test.db"),
+        # Most tests aren't exercising the US-market filter; keep it off so
+        # they don't need a fake Gamma API response. Filter-specific tests
+        # override this with dataclasses.replace(...).
+        require_us_markets=False,
+        telegram_bot_token="",
+        telegram_chat_id="",
     )

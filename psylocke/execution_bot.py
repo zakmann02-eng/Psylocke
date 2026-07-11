@@ -5,7 +5,7 @@ holds trading credentials or calls the CLOB API. Signals sit for
 EXECUTION_DELAY_SECONDS before being actionable, and DRY_RUN defaults to
 true, so nothing trades for real until both are deliberately turned off.
 """
-from . import db
+from . import db, notify
 from .clob_execution import ExecutionClient
 from .config import load_config
 from .logging_setup import setup_logging
@@ -56,15 +56,32 @@ def execute_entry(conn, execution_client, config, signal) -> None:
         )
         _record_own_entry(conn, signal, size_shares, price)
         db.update_signal_status(conn, signal["id"], "EXECUTED_DRYRUN")
+        notify.send(
+            config,
+            f"\U0001F916 <b>Psylocke 2</b> [DRY RUN] BUY {size_shares:.2f} shares of "
+            f"{signal['title']} ({signal['outcome']}) @ {price:.3f} (~${size_usd:.2f})\n"
+            f"Mirroring wallet {signal['wallet']}",
+        )
         return
 
     try:
         execution_client.place_order(signal["token_id"], "BUY", price, size_shares)
         _record_own_entry(conn, signal, size_shares, price)
         db.update_signal_status(conn, signal["id"], "EXECUTED")
+        notify.send(
+            config,
+            f"\U0001F916 <b>Psylocke 2</b> BUY {size_shares:.2f} shares of "
+            f"{signal['title']} ({signal['outcome']}) @ {price:.3f} (~${size_usd:.2f})\n"
+            f"Mirroring wallet {signal['wallet']}",
+        )
     except Exception as exc:
         logger.exception("BUY order failed for signal %s", signal["id"])
         db.update_signal_status(conn, signal["id"], "FAILED", str(exc)[:500])
+        notify.send(
+            config,
+            f"⚠️ <b>Psylocke 2</b> BUY FAILED for signal #{signal['id']} "
+            f"({signal['title']}): {str(exc)[:300]}",
+        )
 
 
 def execute_exit(conn, execution_client, config, signal) -> None:
@@ -83,15 +100,32 @@ def execute_exit(conn, execution_client, config, signal) -> None:
         )
         _record_own_exit(conn, signal, size_shares)
         db.update_signal_status(conn, signal["id"], "EXECUTED_DRYRUN")
+        notify.send(
+            config,
+            f"\U0001F916 <b>Psylocke 2</b> [DRY RUN] SELL {size_shares:.2f} shares "
+            f"({fraction * 100:.0f}% of position) of {signal['title']} ({signal['outcome']}) @ {price:.3f}\n"
+            f"Mirroring wallet {signal['wallet']}",
+        )
         return
 
     try:
         execution_client.place_order(signal["token_id"], "SELL", price, size_shares)
         _record_own_exit(conn, signal, size_shares)
         db.update_signal_status(conn, signal["id"], "EXECUTED")
+        notify.send(
+            config,
+            f"\U0001F916 <b>Psylocke 2</b> SELL {size_shares:.2f} shares "
+            f"({fraction * 100:.0f}% of position) of {signal['title']} ({signal['outcome']}) @ {price:.3f}\n"
+            f"Mirroring wallet {signal['wallet']}",
+        )
     except Exception as exc:
         logger.exception("SELL order failed for signal %s", signal["id"])
         db.update_signal_status(conn, signal["id"], "FAILED", str(exc)[:500])
+        notify.send(
+            config,
+            f"⚠️ <b>Psylocke 2</b> SELL FAILED for signal #{signal['id']} "
+            f"({signal['title']}): {str(exc)[:300]}",
+        )
 
 
 def process_signal(conn, execution_client, config, signal) -> None:

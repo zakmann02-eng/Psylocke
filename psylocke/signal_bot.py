@@ -6,7 +6,7 @@ itself: Psylocke 2 (execution_bot.py) is the only process with access to
 trading credentials, so a bug or bad signal here can be reviewed (or
 paused) before it touches real funds.
 """
-from . import db
+from . import db, notify
 from .config import load_config
 from .logging_setup import setup_logging
 from .polymarket_data import DataAPIClient, poll_forever
@@ -50,9 +50,30 @@ def seed_wallet(conn, data_client: DataAPIClient, wallet: str) -> None:
     logger.info("seeded wallet %s", wallet)
 
 
-def process_activity_item(conn, wallet: str, item: dict, bankroll_usd: float, data_client: DataAPIClient = None):
-    """Turn one raw activity item into a signal row, if it's new. Returns the
-    new signal id, or None if this trade was already processed."""
+def is_us_market(conn, data_client: DataAPIClient, config, market_id: str) -> bool:
+    """Fail-closed tag check: a market only passes if we positively confirm
+    one of its tags is in config.us_market_tags. If we can't determine its
+    tags at all (lookup error, unknown market), it's treated as non-US
+    rather than risk copying a trade outside the requested scope."""
+    if not market_id:
+        return False
+    tags = db.get_cached_market_tags(conn, market_id)
+    if tags is None:
+        try:
+            tags = data_client.get_market_tags(market_id)
+        except Exception:
+            logger.exception("failed to fetch tags for market %s; treating as non-US", market_id)
+            return False
+        db.set_market_tags(conn, market_id, tags)
+    return any(tag in config.us_market_tags for tag in tags)
+
+
+def process_activity_item(conn, wallet: str, item: dict, config, data_client: DataAPIClient = None):
+    """Turn one raw activity item into a signal row, if it's new and (when
+    REQUIRE_US_MARKETS is set) about a US-tagged market. Returns the new
+    signal id, or None if this trade was already processed or filtered
+    out -- the wallet's position ledger is still updated either way, so
+    later exit-fraction math stays correct regardless of the filter."""
     trade = _extract_trade_fields(item)
     if db.has_seen(conn, wallet, trade["tx_hash"]):
         return None
@@ -68,14 +89,22 @@ def process_activity_item(conn, wallet: str, item: dict, bankroll_usd: float, da
         db.set_wallet_shares(conn, wallet, trade["token_id"], prior_shares + trade["shares"])
         if data_client is not None:
             wallet_value = data_client.get_portfolio_value(wallet)
-        if wallet_value and wallet_value > 0 and bankroll_usd > 0:
-            computed_size_usd = (bankroll_usd / wallet_value) * trade["usd_size"]
+        if wallet_value and wallet_value > 0 and config.bankroll_usd > 0:
+            computed_size_usd = (config.bankroll_usd / wallet_value) * trade["usd_size"]
     else:
         kind = "EXIT"
         db.set_wallet_shares(conn, wallet, trade["token_id"], max(prior_shares - trade["shares"], 0.0))
         exit_fraction = min(trade["shares"] / prior_shares, 1.0) if prior_shares > 0 else 1.0
 
-    return db.insert_signal(
+    if config.require_us_markets and data_client is not None:
+        if not is_us_market(conn, data_client, config, trade["market_id"]):
+            logger.info(
+                "skipping non-US (or unverifiable) market: %s (%s)",
+                trade["market_id"], trade["title"],
+            )
+            return None
+
+    signal_id = db.insert_signal(
         conn,
         tx_hash=trade["tx_hash"],
         wallet=wallet,
@@ -92,6 +121,25 @@ def process_activity_item(conn, wallet: str, item: dict, bankroll_usd: float, da
         computed_size_usd=computed_size_usd,
     )
 
+    if kind == "ENTRY":
+        size_note = f"${computed_size_usd:.2f}" if computed_size_usd else "unknown (bankroll or wallet value not set)"
+        notify.send(
+            config,
+            f"\U0001F50D <b>Psylocke 1</b> — new ENTRY signal #{signal_id}\n"
+            f"{trade['title']} ({trade['outcome']})\n"
+            f"Wallet {wallet} bought ${trade['usd_size']:.2f} @ {trade['price']:.3f}\n"
+            f"Your proportional size: {size_note}",
+        )
+    else:
+        notify.send(
+            config,
+            f"\U0001F50D <b>Psylocke 1</b> — new EXIT signal #{signal_id}\n"
+            f"{trade['title']} ({trade['outcome']})\n"
+            f"Wallet {wallet} closed {exit_fraction * 100:.0f}% of their position @ {trade['price']:.3f}",
+        )
+
+    return signal_id
+
 
 def poll_once(conn, data_client: DataAPIClient, config) -> None:
     """One pass over every tracked wallet's recent activity. Shared by the
@@ -99,7 +147,7 @@ def poll_once(conn, data_client: DataAPIClient, config) -> None:
     for wallet in config.tracked_wallets:
         activity = data_client.get_activity(wallet, limit=50)
         for item in reversed(activity):  # oldest first, preserves ledger order
-            signal_id = process_activity_item(conn, wallet, item, config.bankroll_usd, data_client)
+            signal_id = process_activity_item(conn, wallet, item, config, data_client)
             if signal_id:
                 logger.info("new signal id=%s wallet=%s token=%s", signal_id, wallet, item.get("asset"))
 
@@ -110,7 +158,7 @@ def run():
     poll_once() a single time per invocation."""
     config = load_config()
     conn = db.get_connection(config.db_path)
-    data_client = DataAPIClient(config.data_api_base)
+    data_client = DataAPIClient(config.data_api_base, config.gamma_api_base)
 
     for wallet in config.tracked_wallets:
         seed_wallet(conn, data_client, wallet)
