@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from psylocke import db
-from psylocke.signal_bot import is_us_market, process_activity_item, seed_wallet
+from psylocke.analysis import is_us_market, process_activity_item, seed_wallet
 
 
 class FakeDataClient:

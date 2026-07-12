@@ -52,7 +52,7 @@ class Config:
     poll_interval_seconds: float = field(
         default_factory=lambda: _get_float("POLL_INTERVAL_SECONDS", 30)
     )
-    # Signals sit for this long before Psylocke 2 will act on them. This is a
+    # Signals sit for this long before the bot will act on them. This is a
     # deliberate buffer (not a performance knob): acting instantly on a
     # detected trade is what makes a copy-trading bot conspicuous.
     execution_delay_seconds: float = field(
@@ -89,9 +89,9 @@ class Config:
     gamma_api_base: str = field(
         default_factory=lambda: os.getenv("GAMMA_API_BASE", "https://gamma-api.polymarket.com")
     )
-    # If true, Psylocke 1 only signals on markets tagged with one of
-    # us_market_tags; a market whose tags can't be determined is skipped
-    # (fail closed) rather than risk copying a non-US market.
+    # If true, only signal on markets tagged with one of us_market_tags; a
+    # market whose tags can't be determined is skipped (fail closed) rather
+    # than risk copying a non-US market.
     require_us_markets: bool = field(
         default_factory=lambda: _get_bool("REQUIRE_US_MARKETS", True)
     )

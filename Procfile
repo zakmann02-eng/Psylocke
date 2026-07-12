@@ -1,1 +1,1 @@
-worker: python run_both.py
+worker: python -m psylocke.bot

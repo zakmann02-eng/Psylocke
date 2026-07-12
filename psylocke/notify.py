@@ -1,10 +1,10 @@
-"""Real-time visibility into what Psylocke 1 and 2 are doing, via Telegram.
+"""Real-time visibility into what Psylocke is doing, via Telegram.
 
 This is deliberately decoupled from the signals table: it's a one-way
-broadcast each bot does independently after acting, not a control channel.
-Neither bot's logic depends on a message actually being delivered -- if
-TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID aren't set, or a send fails, trading
-continues unaffected and it's just logged.
+broadcast after the fact, not a control channel. Trading logic never
+depends on a message actually being delivered -- if TELEGRAM_BOT_TOKEN/
+TELEGRAM_CHAT_ID aren't set, or a send fails, trading continues unaffected
+and it's just logged.
 """
 import logging
 

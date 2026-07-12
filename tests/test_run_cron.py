@@ -32,7 +32,7 @@ def test_run_cron_main_seeds_signals_and_defers_execution(tmp_path, monkeypatch)
     monkeypatch.setenv("DB_PATH", str(tmp_path / "cron.db"))
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setenv("EXECUTION_DELAY_SECONDS", "20")
-    # US-market filtering is covered separately in test_signal_bot.py; keep
+    # US-market filtering is covered separately in test_analysis.py; keep
     # it off here so this test only exercises cron wiring.
     monkeypatch.setenv("REQUIRE_US_MARKETS", "false")
 

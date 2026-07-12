@@ -1,17 +1,18 @@
-"""Psylocke 1 — signal/analysis bot.
+"""Analysis: turns tracked wallets' on-chain trades into internal signals.
 
-Watches the tracked wallets' public on-chain activity and turns each new
-trade into a row in the shared `signals` table. It never places an order
-itself: Psylocke 2 (execution_bot.py) is the only process with access to
-trading credentials, so a bug or bad signal here can be reviewed (or
-paused) before it touches real funds.
+This is one half of what the bot does each cycle (see bot.py) -- it watches
+the tracked wallets' public activity and decides what should be copied. It
+never places an order itself; execution.py reads what this writes and acts
+on it after a deliberate delay (see EXECUTION_DELAY_SECONDS). Splitting
+detection from action isn't about separate processes anymore, it's about
+keeping "what should we do" and "actually spending money" as distinct,
+independently reviewable steps within the one bot.
 """
 from . import db, notify
-from .config import load_config
 from .logging_setup import setup_logging
-from .polymarket_data import DataAPIClient, poll_forever
+from .polymarket_data import DataAPIClient
 
-logger = setup_logging("psylocke.signal_bot")
+logger = setup_logging("psylocke.analysis")
 
 
 def _extract_trade_fields(item: dict) -> dict:
@@ -125,15 +126,15 @@ def process_activity_item(conn, wallet: str, item: dict, config, data_client: Da
         size_note = f"${computed_size_usd:.2f}" if computed_size_usd else "unknown (bankroll or wallet value not set)"
         notify.send(
             config,
-            f"\U0001F50D <b>Psylocke 1</b> — new ENTRY signal #{signal_id}\n"
+            f"\U0001F50D <b>Psylocke</b> — new ENTRY signal #{signal_id}\n"
             f"{trade['title']} ({trade['outcome']})\n"
             f"Wallet {wallet} bought ${trade['usd_size']:.2f} @ {trade['price']:.3f}\n"
-            f"Your proportional size: {size_note}",
+            f"Proportional size: {size_note}",
         )
     else:
         notify.send(
             config,
-            f"\U0001F50D <b>Psylocke 1</b> — new EXIT signal #{signal_id}\n"
+            f"\U0001F50D <b>Psylocke</b> — new EXIT signal #{signal_id}\n"
             f"{trade['title']} ({trade['outcome']})\n"
             f"Wallet {wallet} closed {exit_fraction * 100:.0f}% of their position @ {trade['price']:.3f}",
         )
@@ -142,34 +143,10 @@ def process_activity_item(conn, wallet: str, item: dict, config, data_client: Da
 
 
 def poll_once(conn, data_client: DataAPIClient, config) -> None:
-    """One pass over every tracked wallet's recent activity. Shared by the
-    always-on loop (run()) and the single-shot cron entrypoint."""
+    """One analysis pass over every tracked wallet's recent activity."""
     for wallet in config.tracked_wallets:
         activity = data_client.get_activity(wallet, limit=50)
         for item in reversed(activity):  # oldest first, preserves ledger order
             signal_id = process_activity_item(conn, wallet, item, config, data_client)
             if signal_id:
                 logger.info("new signal id=%s wallet=%s token=%s", signal_id, wallet, item.get("asset"))
-
-
-def run():
-    """Continuous loop for always-on deployments (e.g. run_both.py). For a
-    scheduled/cron deployment, use run_cron.py instead -- it calls
-    poll_once() a single time per invocation."""
-    config = load_config()
-    conn = db.get_connection(config.db_path)
-    data_client = DataAPIClient(config.data_api_base, config.gamma_api_base)
-
-    for wallet in config.tracked_wallets:
-        seed_wallet(conn, data_client, wallet)
-
-    logger.info(
-        "Psylocke 1 (signal bot) watching %d wallet(s), poll every %ss",
-        len(config.tracked_wallets),
-        config.poll_interval_seconds,
-    )
-    poll_forever(lambda: poll_once(conn, data_client, config), config.poll_interval_seconds, logger)
-
-
-if __name__ == "__main__":
-    run()

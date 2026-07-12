@@ -1,8 +1,8 @@
 """Order placement via Polymarket's CLOB API (py-clob-client).
 
-The client is constructed lazily so that DRY_RUN mode — and all of
-Psylocke 2's unit tests — can run without POLY_PRIVATE_KEY ever being set.
-Only a live (non-dry-run) order actually needs signing credentials.
+The client is constructed lazily so that DRY_RUN mode — and the execution
+unit tests — can run without POLY_PRIVATE_KEY ever being set. Only a live
+(non-dry-run) order actually needs signing credentials.
 """
 import logging
 

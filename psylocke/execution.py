@@ -1,17 +1,14 @@
-"""Psylocke 2 — execution bot.
+"""Execution: acts on the signals analysis.py writes.
 
-Polls the `signals` table Psylocke 1 writes to and is the only process that
-holds trading credentials or calls the CLOB API. Signals sit for
-EXECUTION_DELAY_SECONDS before being actionable, and DRY_RUN defaults to
-true, so nothing trades for real until both are deliberately turned off.
+This is the other half of what the bot does each cycle (see bot.py) -- it
+reads pending signals, waits for EXECUTION_DELAY_SECONDS to pass, sizes and
+either simulates (DRY_RUN) or actually places the corresponding order via
+the CLOB API. This module is the only place trading credentials get used.
 """
 from . import db, notify
-from .clob_execution import ExecutionClient
-from .config import load_config
 from .logging_setup import setup_logging
-from .polymarket_data import poll_forever
 
-logger = setup_logging("psylocke.execution_bot")
+logger = setup_logging("psylocke.execution")
 
 
 def _record_own_entry(conn, signal, size_shares: float, price: float) -> None:
@@ -58,7 +55,7 @@ def execute_entry(conn, execution_client, config, signal) -> None:
         db.update_signal_status(conn, signal["id"], "EXECUTED_DRYRUN")
         notify.send(
             config,
-            f"\U0001F916 <b>Psylocke 2</b> [DRY RUN] BUY {size_shares:.2f} shares of "
+            f"\U0001F916 <b>Psylocke</b> [DRY RUN] BUY {size_shares:.2f} shares of "
             f"{signal['title']} ({signal['outcome']}) @ {price:.3f} (~${size_usd:.2f})\n"
             f"Mirroring wallet {signal['wallet']}",
         )
@@ -70,7 +67,7 @@ def execute_entry(conn, execution_client, config, signal) -> None:
         db.update_signal_status(conn, signal["id"], "EXECUTED")
         notify.send(
             config,
-            f"\U0001F916 <b>Psylocke 2</b> BUY {size_shares:.2f} shares of "
+            f"\U0001F916 <b>Psylocke</b> BUY {size_shares:.2f} shares of "
             f"{signal['title']} ({signal['outcome']}) @ {price:.3f} (~${size_usd:.2f})\n"
             f"Mirroring wallet {signal['wallet']}",
         )
@@ -79,7 +76,7 @@ def execute_entry(conn, execution_client, config, signal) -> None:
         db.update_signal_status(conn, signal["id"], "FAILED", str(exc)[:500])
         notify.send(
             config,
-            f"⚠️ <b>Psylocke 2</b> BUY FAILED for signal #{signal['id']} "
+            f"⚠️ <b>Psylocke</b> BUY FAILED for signal #{signal['id']} "
             f"({signal['title']}): {str(exc)[:300]}",
         )
 
@@ -102,7 +99,7 @@ def execute_exit(conn, execution_client, config, signal) -> None:
         db.update_signal_status(conn, signal["id"], "EXECUTED_DRYRUN")
         notify.send(
             config,
-            f"\U0001F916 <b>Psylocke 2</b> [DRY RUN] SELL {size_shares:.2f} shares "
+            f"\U0001F916 <b>Psylocke</b> [DRY RUN] SELL {size_shares:.2f} shares "
             f"({fraction * 100:.0f}% of position) of {signal['title']} ({signal['outcome']}) @ {price:.3f}\n"
             f"Mirroring wallet {signal['wallet']}",
         )
@@ -114,7 +111,7 @@ def execute_exit(conn, execution_client, config, signal) -> None:
         db.update_signal_status(conn, signal["id"], "EXECUTED")
         notify.send(
             config,
-            f"\U0001F916 <b>Psylocke 2</b> SELL {size_shares:.2f} shares "
+            f"\U0001F916 <b>Psylocke</b> SELL {size_shares:.2f} shares "
             f"({fraction * 100:.0f}% of position) of {signal['title']} ({signal['outcome']}) @ {price:.3f}\n"
             f"Mirroring wallet {signal['wallet']}",
         )
@@ -123,7 +120,7 @@ def execute_exit(conn, execution_client, config, signal) -> None:
         db.update_signal_status(conn, signal["id"], "FAILED", str(exc)[:500])
         notify.send(
             config,
-            f"⚠️ <b>Psylocke 2</b> SELL FAILED for signal #{signal['id']} "
+            f"⚠️ <b>Psylocke</b> SELL FAILED for signal #{signal['id']} "
             f"({signal['title']}): {str(exc)[:300]}",
         )
 
@@ -135,27 +132,7 @@ def process_signal(conn, execution_client, config, signal) -> None:
         execute_exit(conn, execution_client, config, signal)
 
 
-def poll_once(conn, execution_client: ExecutionClient, config) -> None:
-    """One pass over every actionable (past-delay) pending signal. Shared by
-    the always-on loop (run()) and the single-shot cron entrypoint."""
+def poll_once(conn, execution_client, config) -> None:
+    """One execution pass over every actionable (past-delay) pending signal."""
     for signal in db.get_actionable_signals(conn, config.execution_delay_seconds):
         process_signal(conn, execution_client, config, signal)
-
-
-def run():
-    """Continuous loop for always-on deployments (e.g. run_both.py). For a
-    scheduled/cron deployment, use run_cron.py instead -- it calls
-    poll_once() a single time per invocation."""
-    config = load_config()
-    conn = db.get_connection(config.db_path)
-    execution_client = ExecutionClient(config)
-
-    logger.info(
-        "Psylocke 2 (execution bot) started, dry_run=%s, execution_delay=%ss",
-        config.dry_run, config.execution_delay_seconds,
-    )
-    poll_forever(lambda: poll_once(conn, execution_client, config), config.poll_interval_seconds, logger)
-
-
-if __name__ == "__main__":
-    run()

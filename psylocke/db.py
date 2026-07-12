@@ -1,7 +1,9 @@
-"""Shared SQLite store. Psylocke 1 (signal bot) and Psylocke 2 (execution
-bot) are separate processes that never talk to each other directly — this
-database file is the entire interface between them, so a signal written by
-one is durable and auditable even if the other is down or restarts.
+"""SQLite store for Psylocke's internal state: the wallet position ledgers,
+the signals queue/audit trail, this bot's own holdings, and the market-tag
+cache. Keeping this as durable state (rather than in-memory) means a
+restart mid-cycle doesn't lose a pending signal or force re-deriving a
+wallet's position from scratch, and gives a queryable history of every
+decision the bot made.
 """
 import sqlite3
 import time

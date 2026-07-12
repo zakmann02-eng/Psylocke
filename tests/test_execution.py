@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from psylocke import db
-from psylocke.execution_bot import execute_entry, execute_exit
+from psylocke.execution import execute_entry, execute_exit
 
 
 class FakeExecutionClient:
